@@ -30,7 +30,7 @@ from evaluation.metrics import (
 st.set_page_config(
     page_title="Game Recommender System",
     page_icon="🎮",
-    layout="wide"
+    layout="centered"
 )
 
 # Initialize session state for evaluation
