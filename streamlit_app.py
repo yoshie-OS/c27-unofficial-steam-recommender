@@ -61,7 +61,7 @@ if option == "By Steam ID":
     steam_id = st.text_input("Enter your Steam ID:",
                            help="You can enter your Steam ID, custom URL, or SteamID64.")
 
-    if st.button("Get Recommendations") and steam_id:
+    if st.button("Find Games by Steam ID", key="steam_id_button") and steam_id:
         with st.spinner("Fetching your games library..."):
             # Get API key
             api_key = decrypt_api_key()
@@ -100,12 +100,12 @@ if option == "By Steam ID":
                 st.session_state.input_method = "steam_id"
                 st.session_state.selected_tags = None
 
-if option == "By Categories" or (option == "By Steam ID" and 'recommendations' not in st.session_state):
+elif option == "By Categories":
     # Display categories for selection
     available_tags = sorted(unique_tags_df['tag'].tolist())
     selected_tags = st.multiselect("Select your preferred game genres:", available_tags)
 
-    if st.button("Get Recommendations") and selected_tags:
+    if st.button("Find Games by Categories", key="categories_button") and selected_tags:
         with st.spinner("Generating recommendations..."):
             # Create user profile from selected tags
             user_profile = createUserProfileFromSelection(selected_tags, unique_tags_df)
@@ -164,7 +164,7 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
         satisfaction = st.radio("Are you satisfied with these recommendations?", ["Yes", "No"])
 
         if satisfaction == "Yes":
-            if st.button("Submit Positive Feedback"):
+            if st.button("Submit Positive Feedback", key="positive_feedback"):
                 # For users who are satisfied, record perfect scores
                 ratings = {game['app_id']: 5 for _, game in recommendations.iterrows()}
 
@@ -224,7 +224,7 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
                     1, 5, 3, key=f"rating_{game['app_id']}"
                 )
 
-            if st.button("Submit Evaluation"):
+            if st.button("Submit Evaluation", key="negative_feedback"):
                 # Calculate evaluation metrics
                 relevance_scores = list(ratings.values())
 
@@ -324,7 +324,7 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
 
     # Add a reset button to start over
     if st.session_state.evaluation_submitted:
-        if st.button("Start Over"):
+        if st.button("Start Over", key="reset_button"):
             # Clear session state
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
