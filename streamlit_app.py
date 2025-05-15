@@ -82,11 +82,12 @@ if option == "By Steam ID":
                 # Create game profiles
                 game_profiles = createGameProfiles(tags_df, unique_tags_df, games_df)
 
-                # Get recommendations
+                # Get recommendations - explicitly pass the user_library
                 recommendations = getRecommendations(
                     normalized_user_profile,
                     game_profiles,
                     games_df,
+                    user_library=user_library,  # Pass the user library explicitly
                     threshold=0.3,
                     top_n=10
                 )
@@ -99,6 +100,7 @@ if option == "By Steam ID":
                 st.session_state.user_id = steam_id
                 st.session_state.input_method = "steam_id"
                 st.session_state.selected_tags = None
+                st.session_state.user_library = user_library  # Store user_library in session state
 
 elif option == "By Categories":
     # Display categories for selection
@@ -114,11 +116,12 @@ elif option == "By Categories":
             # Create game profiles
             game_profiles = createGameProfiles(tags_df, unique_tags_df, games_df)
 
-            # Get recommendations
+            # Get recommendations - user_library is None for category selection
             recommendations = getRecommendations(
                 normalized_user_profile,
                 game_profiles,
                 games_df,
+                user_library=None,  # No user library for category selection
                 threshold=0.3,
                 top_n=10
             )
@@ -131,6 +134,7 @@ elif option == "By Categories":
             st.session_state.user_id = None
             st.session_state.input_method = "category"
             st.session_state.selected_tags = selected_tags
+            st.session_state.user_library = None  # No user library for category method
 
 # Display recommendations if available
 if 'recommendations' in st.session_state and not st.session_state.recommendations.empty:
@@ -284,6 +288,7 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
                     normalized_updated_profile,
                     st.session_state.game_profiles,
                     games_df,
+                    user_library=st.session_state.user_library,  # Pass the user library from session state
                     threshold=0.3,
                     top_n=10
                 )
