@@ -28,7 +28,7 @@ from evaluation.metrics import (
 
 # Page configuration
 st.set_page_config(
-    page_title="Game Recommender System",
+    page_title="C27 Unofficial Steam Recommender",
     page_icon="🎮",
     layout="centered"
 )
@@ -41,7 +41,7 @@ if 'evaluation_submitted' not in st.session_state:
 Path("user_evaluations").mkdir(exist_ok=True)
 
 # App title and description
-st.title("Steam Game Recommender System")
+st.title("C27 Unofficial Steam Recommender")
 st.write("Get personalized game recommendations based on your preferences.")
 
 # Load data
@@ -60,7 +60,7 @@ option = st.radio("Choose your input method:", ["By Steam ID", "By Categories"])
 if option == "By Steam ID":
     steam_id = st.text_input("Enter your Steam ID:",
                            help="You can enter your Steam ID, custom URL, or SteamID64.")
-
+    st.write("You can enter your Steam ID, custom URL, or SteamID64")
     if st.button("Find Games by Steam ID", key="steam_id_button") and steam_id:
         with st.spinner("Fetching your games library..."):
             # Get API key
