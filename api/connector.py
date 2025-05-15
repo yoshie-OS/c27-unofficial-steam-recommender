@@ -2,6 +2,51 @@ import pandas as pd
 import requests
 import re
 
+def convert_to_steamid64(identifier, api_key):
+    """Convert any Steam ID format to SteamID64"""
+    identifier = identifier.strip()
+
+    # Already a SteamID64 (17-digit number)
+    if re.match(r'^\d{17}$', identifier):
+        return identifier
+
+    # SteamID format (STEAM_0:X:XXXXXXXX)
+    steamid_match = re.match(r'^STEAM_0:([0-1]):(\d+)$', identifier)
+    if steamid_match:
+        y = int(steamid_match.group(1))
+        z = int(steamid_match.group(2))
+        return str(76561197960265728 + y + (z * 2))
+
+    # SteamID3 format ([U:1:XXXXXXXX])
+    steamid3_match = re.match(r'^\[U:1:(\d+)\]$', identifier)
+    if steamid3_match:
+        account_id = int(steamid3_match.group(1))
+        return str(76561197960265728 + account_id)
+
+    # Hexadecimal ID (convert to decimal first)
+    if re.match(r'^[0-9A-Fa-f]+$', identifier):
+        try:
+            decimal_id = int(identifier, 16)
+            return str(decimal_id)
+        except ValueError:
+            pass
+
+    # Custom URL (use API to resolve)
+    # This assumes the input is just the custom URL part, not the full URL
+    resolve_url = f"https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key={api_key}&vanityurl={identifier}"
+    try:
+        response = requests.get(resolve_url)
+        data = response.json()
+
+        if data.get('response', {}).get('success') == 1:
+            return data['response']['steamid']
+    except Exception as e:
+        print(f"Error resolving vanity URL: {e}")
+
+    # If we got here, we couldn't identify the format
+    return None
+
+
 def userDataCollector(steam_id, api_key=None) -> pd.DataFrame:
     """
     Get games owned by a specific user.
@@ -21,7 +66,7 @@ def userDataCollector(steam_id, api_key=None) -> pd.DataFrame:
             # Use the already implemented conversion function
             # Assuming the function is named convert_to_steamid64
             original_id = steam_id
-            steam_id = convertToSteamid64(steam_id, api_key)
+            steam_id = convert_to_steamid64(steam_id, api_key)
 
             if not steam_id:
                 print(f"Failed to convert '{original_id}' to SteamID64.")
@@ -96,47 +141,3 @@ def userDataCollector(steam_id, api_key=None) -> pd.DataFrame:
     except Exception as e:
         print(f"Gagal mengambil data user: {e}")
         return pd.DataFrame()
-
-def convert_to_steamid64(identifier, api_key):
-    """Convert any Steam ID format to SteamID64"""
-    identifier = identifier.strip()
-
-    # Already a SteamID64 (17-digit number)
-    if re.match(r'^\d{17}$', identifier):
-        return identifier
-
-    # SteamID format (STEAM_0:X:XXXXXXXX)
-    steamid_match = re.match(r'^STEAM_0:([0-1]):(\d+)$', identifier)
-    if steamid_match:
-        y = int(steamid_match.group(1))
-        z = int(steamid_match.group(2))
-        return str(76561197960265728 + y + (z * 2))
-
-    # SteamID3 format ([U:1:XXXXXXXX])
-    steamid3_match = re.match(r'^\[U:1:(\d+)\]$', identifier)
-    if steamid3_match:
-        account_id = int(steamid3_match.group(1))
-        return str(76561197960265728 + account_id)
-
-    # Hexadecimal ID (convert to decimal first)
-    if re.match(r'^[0-9A-Fa-f]+$', identifier):
-        try:
-            decimal_id = int(identifier, 16)
-            return str(decimal_id)
-        except ValueError:
-            pass
-
-    # Custom URL (use API to resolve)
-    # This assumes the input is just the custom URL part, not the full URL
-    resolve_url = f"https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key={api_key}&vanityurl={identifier}"
-    try:
-        response = requests.get(resolve_url)
-        data = response.json()
-
-        if data.get('response', {}).get('success') == 1:
-            return data['response']['steamid']
-    except Exception as e:
-        print(f"Error resolving vanity URL: {e}")
-
-    # If we got here, we couldn't identify the format
-    return None
