@@ -3,17 +3,10 @@ import streamlit as st
 
 def decrypt_api_key():
     """Decrypt the API key using the encryption key"""
-    # # Load the encryption key
-    # with open('./.streamlit/encryption_key.key', 'rb') as key_file:
-    #     encryption_key = key_file.read()
-
-    # # Load the encrypted API key
-    # with open('./.streamlit/encrypted_api_key.bin', 'rb') as file:
-    #     encrypted_api_key = file.read()
-
-    # # Decrypt the API key
-    # fernet = Fernet(encryption_key)
-    # api_key = fernet.decrypt(encrypted_api_key).decode()
+    # Initially, this function was used to decrypt the API code
+    # which was stored in a .bin for the encrypted key and .key file for the encryption key.
+    # I kept the name 'decrypt_api_key' in order to avoid having to change the name of the function in each file
+    # that has one or more variables in which this function is assigned to.
 
     try:
         return st.secrets["api_keys"]["steam"]

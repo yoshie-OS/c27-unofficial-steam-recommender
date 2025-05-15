@@ -58,9 +58,8 @@ games_df, tags_df, unique_tags_df = load_data()
 option = st.radio("Choose your input method:", ["By Steam ID", "By Categories"])
 
 if option == "By Steam ID":
-    steam_id = st.text_input("Enter your Steam ID:",
+    steam_id = st.text_input("Enter your Steam ID or custom URL:",
                            help="You can enter your Steam ID, custom URL, or SteamID64.")
-    st.write("You can enter your Steam ID, custom URL, or SteamID64")
     if st.button("Find Games by Steam ID", key="steam_id_button") and steam_id:
         with st.spinner("Fetching your games library..."):
             # Get API key
@@ -162,6 +161,7 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
     st.header("Evaluation")
 
     # Get user consent
+    st.markdown("We do not collect any of your data without your permission.</br> The data that we collect are ratings data that you have provided,</br> this data is used to better engineer the model to generate more accurate results.")
     user_consent = st.checkbox("I agree to share my ratings data for research purposes")
 
     if not st.session_state.evaluation_submitted:
@@ -333,7 +333,7 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
             # Clear session state
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
-            st.experimental_rerun()
+            st.rerun()
 
 # Footer
 st.markdown("---")
