@@ -1,12 +1,9 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 from pathlib import Path
-import datetime
-import json
 
 # Import your existing functions
-from api.connector import userDataCollector, convert_to_steamid64
+from api.connector import userDataCollector
 from api.utils import decrypt_api_key
 
 # Import recommender functions
@@ -122,7 +119,6 @@ if option == "By Categories" or (option == "By Steam ID" and 'recommendations' n
                 normalized_user_profile,
                 game_profiles,
                 games_df,
-                user_library,
                 threshold=0.3,
                 top_n=10
             )
@@ -336,4 +332,4 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
 
 # Footer
 st.markdown("---")
-st.caption("Steam Game Recommender System © 2025")
+st.caption("C27 Unofficial Steam Recommender © 2025")
