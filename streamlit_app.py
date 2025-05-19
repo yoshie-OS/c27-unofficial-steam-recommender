@@ -301,7 +301,11 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
 
                     with col1:
                         # We could show an image here if available
-                        st.image("https://via.placeholder.com/150x100?text=Game", width=150)
+                        image_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{game['app_id']}/header.jpg"
+                        try:
+                            st.image(image_url, width=150)
+                        except Exception as e:
+                            st.image("https://via.placeholder.com/150x100?text=Game", width=150)
 
                     with col2:
                         st.subheader(game['name'])
