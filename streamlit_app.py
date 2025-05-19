@@ -146,8 +146,12 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
         col1, col2 = st.columns([1, 3])
 
         with col1:
-            # We could show an image here if available
-            st.image("https://via.placeholder.com/150x100?text=Game", width=150)
+            # we could show an image here if available
+            image_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{game['app_id']}/header.jpg"
+            try:
+                st.image(image_url, width=150)
+            except exception as e:
+                st.image("https://via.placeholder.com/150x100?text=game", width=150)
 
         with col2:
             st.subheader(game['name'])
@@ -300,12 +304,12 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
                     col1, col2 = st.columns([1, 3])
 
                     with col1:
-                        # We could show an image here if available
+                        # we could show an image here if available
                         image_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{game['app_id']}/header.jpg"
                         try:
                             st.image(image_url, width=150)
-                        except Exception as e:
-                            st.image("https://via.placeholder.com/150x100?text=Game", width=150)
+                        except exception as e:
+                            st.image("https://via.placeholder.com/150x100?text=game", width=150)
 
                     with col2:
                         st.subheader(game['name'])
