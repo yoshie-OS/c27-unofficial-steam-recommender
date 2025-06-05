@@ -12,15 +12,17 @@ from recommender.model import (
     createUserProfileFromSelection,
     normalizeUserProfile,
     createGameProfiles,
-    getRecommendations
+    getRecommendations,
+    getRecommendationsWithNeutralProtection,
+    updateUserProfileWith3TierResistance,
+    updateTagRelevancyWithResistance
 )
 
-# Import evaluation functions (new package)
+# Import evaluation functions
 from evaluation.metrics import (
     calculateNDCG,
     calculateRelevanceScore,
     calculateGenreCoverage,
-    updateUserProfileWeights,
     extractUserGenres,
     extractRecommendedGenres,
     saveUserEvaluation
@@ -33,9 +35,21 @@ st.set_page_config(
     layout="centered"
 )
 
-# Initialize session state for evaluation
+# Enhanced 3-tier session state initialization with original tag protection
 if 'evaluation_submitted' not in st.session_state:
     st.session_state.evaluation_submitted = False
+if 'blacklisted_games' not in st.session_state:
+    st.session_state.blacklisted_games = set()
+if 'whitelisted_games' not in st.session_state:
+    st.session_state.whitelisted_games = set()
+if 'neutral_games' not in st.session_state:
+    st.session_state.neutral_games = set()
+if 'tag_relevancy' not in st.session_state:
+    st.session_state.tag_relevancy = {}
+if 'show_improved' not in st.session_state:
+    st.session_state.show_improved = False
+if 'original_user_tags' not in st.session_state:
+    st.session_state.original_user_tags = set()  # Track user's original interests
 
 # Create directory for saving user evaluations
 Path("user_evaluations").mkdir(exist_ok=True)
@@ -78,20 +92,24 @@ if option == "By Steam ID":
                 user_profile = createUserProfile(user_library, tags_df, unique_tags_df)
                 normalized_user_profile = normalizeUserProfile(user_profile)
 
+                # Track original user tags (from Steam library)
+                original_tags = set(user_profile[user_profile['tag_count'] > 0]['tag'].tolist())
+                st.session_state.original_user_tags = original_tags
+
                 # Create game profiles
                 game_profiles = createGameProfiles(tags_df, unique_tags_df, games_df)
 
-                # Get recommendations - explicitly pass the user_library
+                # Get recommendations
                 recommendations = getRecommendations(
                     normalized_user_profile,
                     game_profiles,
                     games_df,
-                    user_library=user_library,  # Pass the user library explicitly
+                    user_library=user_library,
                     threshold=0.3,
                     top_n=10
                 )
 
-                # Store in session state for later use
+                # Store in session state
                 st.session_state.recommendations = recommendations
                 st.session_state.user_profile = user_profile
                 st.session_state.normalized_user_profile = normalized_user_profile
@@ -99,33 +117,66 @@ if option == "By Steam ID":
                 st.session_state.user_id = steam_id
                 st.session_state.input_method = "steam_id"
                 st.session_state.selected_tags = None
-                st.session_state.user_library = user_library  # Store user_library in session state
+                st.session_state.user_library = user_library
 
 elif option == "By Categories":
-    # Display categories for selection
-    available_tags = sorted(unique_tags_df['tag'].tolist())
-    selected_tags = st.multiselect("Select your preferred game genres:", available_tags)
+    st.subheader("Select your preferred game genres:")
 
-    if st.button("Find Games by Categories", key="categories_button") and selected_tags:
+    # Get available tags
+    available_tags = sorted(unique_tags_df['tag'].tolist())
+
+    # Let user select categories first
+    selected_tags = st.multiselect("Choose genres you're interested in:", available_tags)
+
+    # If tags are selected, show importance sliders
+    tag_weights = {}
+    if selected_tags:
+        st.subheader("Rate the importance of each selected genre:")
+
+        for tag in selected_tags:
+            # Create slider with descriptive labels
+            weight = st.slider(
+                f"{tag}",
+                min_value=1,
+                max_value=5,
+                value=3,
+                key=f"weight_{tag}",
+                help=f"How important is {tag} to you?"
+            )
+
+            # Add custom labels
+            col1, col2, col3 = st.columns([1, 8, 1])
+            with col1:
+                st.markdown("<p style='text-align: left; font-size: 12px; color: #888; margin-top: -15px;'>Low Importance</p>", unsafe_allow_html=True)
+            with col3:
+                st.markdown("<p style='text-align: right; font-size: 12px; color: #888; margin-top: -15px;'>Critical Importance</p>", unsafe_allow_html=True)
+
+            tag_weights[tag] = weight
+
+    # Show generate button only if tags are selected
+    if selected_tags and st.button("Find Games by Categories", key="categories_button"):
         with st.spinner("Generating recommendations..."):
-            # Create user profile from selected tags
-            user_profile = createUserProfileFromSelection(selected_tags, unique_tags_df)
+            # Create user profile from selected tags with weights
+            user_profile = createUserProfileFromSelection(tag_weights, unique_tags_df)
             normalized_user_profile = normalizeUserProfile(user_profile)
+
+            # Track original user tags (from category selection)
+            st.session_state.original_user_tags = set(selected_tags)
 
             # Create game profiles
             game_profiles = createGameProfiles(tags_df, unique_tags_df, games_df)
 
-            # Get recommendations - user_library is None for category selection
+            # Get recommendations
             recommendations = getRecommendations(
                 normalized_user_profile,
                 game_profiles,
                 games_df,
-                user_library=None,  # No user library for category selection
+                user_library=None,
                 threshold=0.3,
                 top_n=10
             )
 
-            # Store in session state for later use
+            # Store in session state
             st.session_state.recommendations = recommendations
             st.session_state.user_profile = user_profile
             st.session_state.normalized_user_profile = normalized_user_profile
@@ -133,215 +184,301 @@ elif option == "By Categories":
             st.session_state.user_id = None
             st.session_state.input_method = "category"
             st.session_state.selected_tags = selected_tags
-            st.session_state.user_library = None  # No user library for category method
+            st.session_state.tag_weights = tag_weights
+            st.session_state.user_library = None
 
 # Display recommendations if available
 if 'recommendations' in st.session_state and not st.session_state.recommendations.empty:
     recommendations = st.session_state.recommendations
 
-    st.header("Recommended Games")
+    # EVALUATION RESULTS PAGE
+    if st.session_state.evaluation_submitted:
+        st.header("Evaluation Results")
 
-    # Display the recommendations in a nice format
-    for i, game in recommendations.iterrows():
-        col1, col2 = st.columns([1, 3])
+        # Get stored data
+        ratings = st.session_state.evaluation_ratings
 
+        # ENHANCED 3-TIER EVALUATION LOGIC
+        # 1. Update blacklist/whitelist/neutral based on ratings
+        for app_id, rating in ratings.items():
+            if rating <= 2:  # Low ratings go to blacklist
+                st.session_state.blacklisted_games.add(app_id)
+                # Remove from other lists if exists
+                st.session_state.neutral_games.discard(app_id)
+                st.session_state.whitelisted_games.discard(app_id)
+            elif rating == 3:  # Neutral ratings go to safe list
+                st.session_state.neutral_games.add(app_id)
+                # Remove from other lists if exists
+                st.session_state.blacklisted_games.discard(app_id)
+                st.session_state.whitelisted_games.discard(app_id)
+            elif rating >= 4:  # High ratings go to whitelist
+                st.session_state.whitelisted_games.add(app_id)
+                # Remove from other lists if exists
+                st.session_state.blacklisted_games.discard(app_id)
+                st.session_state.neutral_games.discard(app_id)
+
+        # 2. Update tag relevancy scores with 3-tier system
+        st.session_state.tag_relevancy = updateTagRelevancyWithResistance(
+            ratings,
+            games_df,
+            st.session_state.tag_relevancy
+        )
+
+        # 3. Update user profile with 3-tier resistance and original tag protection
+        updated_profile = updateUserProfileWith3TierResistance(
+            st.session_state.user_profile,
+            games_df,
+            ratings,
+            unique_tags_df,
+            st.session_state.original_user_tags  # Pass original tags for protection
+        )
+        normalized_updated_profile = normalizeUserProfile(updated_profile)
+
+        # Calculate evaluation metrics
+        relevance_scores = list(ratings.values())
+
+        # Get user's genres of interest
+        if st.session_state.input_method == "steam_id":
+            user_genres = extractUserGenres(st.session_state.user_profile)
+        else:
+            user_genres = st.session_state.selected_tags
+
+        # Get recommended genres
+        recommended_genres = extractRecommendedGenres(recommendations, games_df)
+
+        # Calculate metrics
+        ndcg = calculateNDCG(relevance_scores)
+        avg_relevance = calculateRelevanceScore(relevance_scores)
+        genre_coverage = calculateGenreCoverage(user_genres, recommended_genres)
+
+        # Display metrics
+        st.subheader("Your Ratings Summary")
+        col1, col2, col3 = st.columns(3)
         with col1:
-            # we could show an image here if available
-            image_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{game['app_id']}/header.jpg"
-            try:
-                st.image(image_url, width=150)
-            except exception as e:
-                st.image("https://via.placeholder.com/150x100?text=game", width=150)
+            st.metric("NDCG Score", f"{ndcg:.3f}")
+        with col2:
+            st.metric("Avg Rating", f"{avg_relevance:.1f}/5.0")
+        with col3:
+            st.metric("Genre Coverage", f"{genre_coverage:.0f}%")
+
+        # Display enhanced session tracking info
+        if st.session_state.blacklisted_games or st.session_state.whitelisted_games or st.session_state.neutral_games:
+            st.subheader("Session Learning Summary")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.write(f"❌ Blacklisted: {len(st.session_state.blacklisted_games)}")
+                st.caption("Games you disliked (won't show again)")
+            with col2:
+                st.write(f"👍 Neutral/Safe: {len(st.session_state.neutral_games)}")
+                st.caption("Games you found decent (medium resistance)")
+            with col3:
+                st.write(f"⭐ Whitelisted: {len(st.session_state.whitelisted_games)}")
+                st.caption("Games you loved (prioritized)")
+
+        # Display updated profile info
+        st.subheader("Your Updated Profile")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Top 5 genres before feedback:**")
+            top_original = st.session_state.normalized_user_profile.sort_values('tag_count', ascending=False).head(5)
+            for _, row in top_original.iterrows():
+                protected_marker = "🔒" if row['tag'] in st.session_state.original_user_tags else ""
+                st.write(f"- {row['tag']}: {row['tag_count']:.3f} {protected_marker}")
 
         with col2:
-            st.subheader(game['name'])
-            st.write(f"Similarity Score: {game['similarity']:.4f}")
+            st.markdown("**Top 5 genres after feedback:**")
+            top_updated = normalized_updated_profile.sort_values('tag_count', ascending=False).head(5)
+            for _, row in top_updated.iterrows():
+                protected_marker = "🔒" if row['tag'] in st.session_state.original_user_tags else ""
+                st.write(f"- {row['tag']}: {row['tag_count']:.3f} {protected_marker}")
 
-            # Link to Steam store
-            steam_url = f"https://store.steampowered.com/app/{game['app_id']}"
-            st.markdown(f"[View on Steam]({steam_url})")
+        if st.session_state.original_user_tags:
+            st.caption("🔒 = Protected original interests (can't go to zero)")
 
-    # Display evaluation section
-    st.header("Evaluation")
+        # Store updated profile
+        st.session_state.user_profile = updated_profile
+        st.session_state.normalized_user_profile = normalized_updated_profile
 
-    # Get user consent
-    st.markdown("We do not collect any of your data without your permission.</br> The data that we collect are ratings data that you have provided,</br> this data is used to better engineer the model to generate more accurate results.")
-    user_consent = st.checkbox("I agree to share my ratings data for research purposes")
+        # Buttons for actions
+        st.header("What's Next?")
+        col1, col2, col3 = st.columns([2, 1, 2])
 
-    if not st.session_state.evaluation_submitted:
-        satisfaction = st.radio("Are you satisfied with these recommendations?", ["Yes", "No"])
+        with col1:
+            if st.button("Get Improved Recommendations", key="get_improved_button"):
+                st.session_state.show_improved = True
 
-        if satisfaction == "Yes":
-            if st.button("Submit Positive Feedback", key="positive_feedback"):
-                # For users who are satisfied, record perfect scores
-                ratings = {game['app_id']: 5 for _, game in recommendations.iterrows()}
+        with col2:
+            st.markdown("<p style='text-align: center; margin: 20px 0; color: #666;'>or</p>", unsafe_allow_html=True)
 
-                # Calculate metrics with perfect scores
-                relevance_scores = list(ratings.values())
+        with col3:
+            if st.button("Start Over", key="start_over_eval"):
+                # Clear all session state
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                st.rerun()
 
-                # Get user's genres of interest
-                if st.session_state.input_method == "steam_id":
-                    user_genres = extractUserGenres(st.session_state.user_profile)
-                else:
-                    user_genres = st.session_state.selected_tags
+        # IMPROVED RECOMMENDATIONS SECTION
+        if st.session_state.show_improved:
+            st.markdown("---")
+            st.header("Improved Recommendations")
 
-                # Get recommended genres
-                recommended_genres = extractRecommendedGenres(recommendations, games_df)
+            # Generate enhanced improved recommendations with 3-tier protection
+            improved_recs = getRecommendationsWithNeutralProtection(
+                normalized_updated_profile,
+                st.session_state.game_profiles,
+                games_df,
+                user_library=st.session_state.user_library,
+                blacklisted_games=st.session_state.blacklisted_games,
+                whitelisted_games=st.session_state.whitelisted_games,
+                neutral_games=st.session_state.neutral_games,
+                tag_relevancy=st.session_state.tag_relevancy,
+                base_threshold=0.2,
+                top_n=10
+            )
 
-                # Calculate metrics
-                ndcg = calculateNDCG(relevance_scores)
-                avg_relevance = calculateRelevanceScore(relevance_scores)
-                genre_coverage = calculateGenreCoverage(user_genres, recommended_genres)
+            if improved_recs.empty:
+                st.warning("No improved recommendations found. Try adjusting your ratings or starting over.")
+                st.write("**Debug Information:**")
+                st.write(f"- Blacklisted games: {len(st.session_state.blacklisted_games)}")
+                st.write(f"- Neutral games: {len(st.session_state.neutral_games)}")
+                st.write(f"- Whitelisted games: {len(st.session_state.whitelisted_games)}")
+                st.write(f"- Protected original tags: {st.session_state.original_user_tags}")
+            else:
+                improved_recs['app_id'] = improved_recs['app_id'].astype(int)
 
-                metrics = {
-                    "ndcg": ndcg,
-                    "relevance_score": avg_relevance,
-                    "genre_coverage": genre_coverage
-                }
+                # FORM untuk prevent auto-rerun setiap slider digeser
+                with st.form("improved_ratings_form"):
+                    st.write("Rate these improved recommendations:")
 
-                # Display metrics
-                st.subheader("Evaluation Results")
-                st.write(f"NDCG (Normalized Discounted Cumulative Gain): {ndcg:.4f}")
-                st.write(f"Average Relevance Score: {avg_relevance:.2f}/5.0")
-                st.write(f"Genre Coverage: {genre_coverage:.2f}%")
+                    ratings_dict = {}
 
-                # Save evaluation data if user consented
-                if user_consent:
-                    saveUserEvaluation(
-                        st.session_state.user_id,
-                        st.session_state.input_method,
-                        st.session_state.selected_tags,
-                        recommendations,
-                        ratings,
-                        metrics
-                    )
-                    st.success("Thank you for your feedback! Your data has been recorded.")
-                else:
-                    st.info("Thank you for your feedback! Your data was not saved as you didn't provide consent.")
+                    for i, game in improved_recs.iterrows():
+                        col1, col2 = st.columns([1, 3])
 
-                st.session_state.evaluation_submitted = True
-
-        elif satisfaction == "No":
-            st.subheader("Please rate the relevance of each recommendation (1-5):")
-
-            # Show sliders for rating each recommendation
-            ratings = {}
-            for i, game in recommendations.iterrows():
-                ratings[game['app_id']] = st.slider(
-                    f"How relevant is '{game['name']}' to your preferences?",
-                    1, 5, 3, key=f"rating_{game['app_id']}"
-                )
-
-            if st.button("Submit Evaluation", key="negative_feedback"):
-                # Calculate evaluation metrics
-                relevance_scores = list(ratings.values())
-
-                # Get user's genres of interest
-                if st.session_state.input_method == "steam_id":
-                    user_genres = extractUserGenres(st.session_state.user_profile)
-                else:
-                    user_genres = st.session_state.selected_tags
-
-                # Get recommended genres
-                recommended_genres = extractRecommendedGenres(recommendations, games_df)
-
-                # Calculate metrics
-                ndcg = calculateNDCG(relevance_scores)
-                avg_relevance = calculateRelevanceScore(relevance_scores)
-                genre_coverage = calculateGenreCoverage(user_genres, recommended_genres)
-
-                metrics = {
-                    "ndcg": ndcg,
-                    "relevance_score": avg_relevance,
-                    "genre_coverage": genre_coverage
-                }
-
-                # Display metrics
-                st.subheader("Evaluation Results")
-                st.write(f"NDCG (Normalized Discounted Cumulative Gain): {ndcg:.4f}")
-                st.write(f"Average Relevance Score: {avg_relevance:.2f}/5.0")
-                st.write(f"Genre Coverage: {genre_coverage:.2f}%")
-
-                # Update user profile based on feedback
-                updated_profile = updateUserProfileWeights(
-                    st.session_state.user_profile,
-                    games_df,
-                    ratings,
-                    unique_tags_df
-                )
-                normalized_updated_profile = normalizeUserProfile(updated_profile)
-
-                # Display updated profile info
-                st.subheader("Your Profile Has Been Updated")
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**Top 5 genres before feedback:**")
-                    top_original = st.session_state.normalized_user_profile.sort_values('tag_count', ascending=False).head(5)
-                    for _, row in top_original.iterrows():
-                        st.write(f"- {row['tag']}: {row['tag_count']:.4f}")
-
-                with col2:
-                    st.markdown("**Top 5 genres after feedback:**")
-                    top_updated = normalized_updated_profile.sort_values('tag_count', ascending=False).head(5)
-                    for _, row in top_updated.iterrows():
-                        st.write(f"- {row['tag']}: {row['tag_count']:.4f}")
-
-                # Get new recommendations with updated profile
-                new_recommendations = getRecommendations(
-                    normalized_updated_profile,
-                    st.session_state.game_profiles,
-                    games_df,
-                    user_library=st.session_state.user_library,  # Pass the user library from session state
-                    threshold=0.3,
-                    top_n=10
-                )
-
-                # Display new recommendations
-                st.subheader("New Recommendations Based on Your Feedback")
-
-                for i, game in new_recommendations.iterrows():
-                    col1, col2 = st.columns([1, 3])
-
-                    with col1:
-                        # we could show an image here if available
-                        image_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{game['app_id']}/header.jpg"
-                        try:
+                        with col1:
+                            # Game image
+                            image_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{game['app_id']}/header.jpg"
                             st.image(image_url, width=150)
-                        except exception as e:
-                            st.image("https://via.placeholder.com/150x100?text=game", width=150)
 
-                    with col2:
-                        st.subheader(game['name'])
-                        st.write(f"Similarity Score: {game['similarity']:.4f}")
+                        with col2:
+                            st.subheader(game['name'])
+                            st.write(f"Similarity Score: {game['similarity']:.4f}")
 
-                        # Link to Steam store
-                        steam_url = f"https://store.steampowered.com/app/{game['app_id']}"
-                        st.markdown(f"[View on Steam]({steam_url})")
+                            # Show tier information
+                            if game['app_id'] in st.session_state.whitelisted_games:
+                                st.write("⭐ *Prioritized - You loved similar games*")
+                            elif game['app_id'] in st.session_state.neutral_games:
+                                st.write("👍 *Safe choice - You found similar games decent*")
+                            elif game['app_id'] in st.session_state.blacklisted_games:
+                                st.write("❌ *This shouldn't appear (debug)*")
+                            else:
+                                st.write("🔍 *New discovery*")
 
-                # Save evaluation data if user consented
-                if user_consent:
-                    saveUserEvaluation(
-                        st.session_state.user_id,
-                        st.session_state.input_method,
-                        st.session_state.selected_tags,
-                        recommendations,
-                        ratings,
-                        metrics
-                    )
-                    st.success("Thank you for your feedback! Your data has been recorded.")
-                else:
-                    st.info("Thank you for your feedback! Your data was not saved as you didn't provide consent.")
+                            # Steam link
+                            steam_url = f"https://store.steampowered.com/app/{game['app_id']}"
+                            st.markdown(f"[View on Steam]({steam_url})")
 
+                            # Rating slider - INI GAK BAKAL AUTO-RERUN
+                            rating = st.slider(
+                                f"Rate {game['name']}",
+                                min_value=1,
+                                max_value=5,
+                                value=3,
+                                key=f"form_improved_{game['app_id']}",
+                                help=f"How relevant is {game['name']} to your preferences?"
+                            )
+
+                            # Store in temporary dict
+                            ratings_dict[game['app_id']] = rating
+
+                        st.markdown("---")
+
+                    # Submit button - BARU RUNNING SETELAH KLIK INI
+                    submitted = st.form_submit_button("Evaluate These Improved Recommendations")
+
+                    if submitted:
+                        # Update evaluation ratings
+                        all_ratings = st.session_state.evaluation_ratings.copy()
+                        all_ratings.update(ratings_dict)
+
+                        st.session_state.evaluation_ratings = all_ratings
+
+                        # Reset improved state for next iteration
+                        st.session_state.show_improved = False
+
+                        # Rerun to show updated results
+                        st.rerun()
+
+    else:
+        # ORIGINAL RECOMMENDATIONS PAGE
+        st.header("Recommended Games")
+
+        # Initialize ratings in session state
+        if 'game_ratings' not in st.session_state:
+            st.session_state.game_ratings = {}
+
+        # Display recommendations with rating sliders
+        for i, game in recommendations.iterrows():
+            col1, col2 = st.columns([1, 3])
+
+            with col1:
+                # Game image
+                image_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{game['app_id']}/header.jpg"
+                st.image(image_url, width=150)
+
+            with col2:
+                st.subheader(game['name'])
+                st.write(f"Similarity Score: {game['similarity']:.4f}")
+
+                # Link to Steam store
+                steam_url = f"https://store.steampowered.com/app/{game['app_id']}"
+                st.markdown(f"[View on Steam]({steam_url})")
+
+                # Rating slider for each game
+                rating = st.slider(
+                    f"Rate this game",
+                    min_value=1,
+                    max_value=5,
+                    value=3,
+                    key=f"game_rating_{game['app_id']}",
+                    help=f"How relevant is {game['name']} to your preferences?"
+                )
+
+                # Add custom labels for the rating slider
+                col_left, col_middle, col_right = st.columns([3, 4, 3])
+                with col_left:
+                    st.markdown("<p style='text-align: left; font-size: 12px; color: #888; margin-top: -15px; white-space: nowrap;'>Not Relevant</p>", unsafe_allow_html=True)
+                with col_right:
+                    st.markdown("<p style='text-align: right; font-size: 12px; color: #888; margin-top: -15px; white-space: nowrap;'>Very Relevant</p>", unsafe_allow_html=True)
+
+                # Store rating in session state
+                st.session_state.game_ratings[game['app_id']] = rating
+
+            st.markdown("---")
+
+        # Evaluation buttons section
+        st.header("Submit Your Feedback")
+
+        col1, col2, col3 = st.columns([2, 1, 2])
+        with col1:
+            if st.button("Evaluate", key="evaluate_button"):
+                # Use current slider ratings
+                ratings = st.session_state.game_ratings.copy()
+
+                # Store evaluation data
+                st.session_state.evaluation_ratings = ratings
                 st.session_state.evaluation_submitted = True
+                st.rerun()
 
-    # Add a reset button to start over
-    if st.session_state.evaluation_submitted:
-        if st.button("Start Over", key="reset_button"):
-            # Clear session state
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+        with col2:
+            st.markdown("<p style='text-align: center; margin: 20px 0; color: #666; font-size: 16px;'>or</p>", unsafe_allow_html=True)
+
+        with col3:
+            if st.button("Start Over", key="start_over_main"):
+                # Clear all session state
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                st.rerun()
 
 # Footer
 st.markdown("---")

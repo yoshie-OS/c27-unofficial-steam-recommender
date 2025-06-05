@@ -3,8 +3,7 @@ from .model import (
     createUserProfileFromSelection,
     normalizeUserProfile,
     createGameProfiles,
-    getRecommendations,
-    convertToSteamid64
+    getRecommendations
 )
 
-__all__ = ['createUserProfile','createUserProfileFromSelection','normalizeUserProfile','createGameProfiles','getRecommendations','convertToSteamid64']
+__all__ = ['createUserProfile','createUserProfileFromSelection','normalizeUserProfile','createGameProfiles','getRecommendations']
