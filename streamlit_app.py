@@ -37,39 +37,45 @@ def add_steam_bg():
     steam_bg = """
     <style>
         .stApp {
-            background-color: #1b2838;
+            background: linear-gradient(135deg, #1b2838 0%, #2a3f5a 50%, #1b2838 100%);
             color: #c7d5e0;
         }
         .stButton>button {
-            background-color: #66c0f4;
-            color: #1b2838;
+            background: linear-gradient(to bottom, #66c0f4 0%, #1e90ff 100%);
+            color: #ffffff;
             font-weight: bold;
             border: none;
+            text-shadow: 0px 1px 1px rgba(0,0,0,0.3);
+            box-shadow: 0px 2px 4px rgba(0,0,0,0.2);
         }
         .stButton>button:hover {
-            background-color: #1e90ff;
+            background: linear-gradient(to bottom, #7dcbff 0%, #4ba6ff 100%);
+            box-shadow: 0px 3px 6px rgba(0,0,0,0.3);
         }
         h1, h2, h3 {
             color: #66c0f4 !important;
+            text-shadow: 0px 2px 3px rgba(0,0,0,0.3);
         }
         .stForm {
             background-color: #2a475e;
             padding: 20px;
             border-radius: 5px;
+            box-shadow: 0px 4px 10px rgba(0,0,0,0.4);
         }
         .stMetric {
-            background-color: #2a475e;
+            background: linear-gradient(to bottom, #2a475e 0%, #1e3346 100%);
             padding: 10px;
             border-radius: 5px;
+            box-shadow: 0px 2px 5px rgba(0,0,0,0.3);
         }
         .css-1d391kg {
             background-color: #2a475e;
         }
         div.stSlider > div[data-baseweb] > div > div {
-            background-color: #66c0f4;
+            background: linear-gradient(to right, #66c0f4, #4ba6ff);
         }
         div.stSlider > div[data-baseweb] > div > div > div {
-            background-color: #1e90ff;
+            background: linear-gradient(to bottom, #1e90ff, #0078d7);
         }
     </style>
     """
@@ -197,9 +203,9 @@ elif option == "By Categories":
             # Add custom labels
             col1, col2, col3 = st.columns([1, 8, 1])
             with col1:
-                st.markdown("<p style='text-align: left; font-size: 12px; color: #888; margin-top: -15px;'>Low Importance</p>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: left; font-size: 12px; color: #888; margin-top: -15px; background: none;'>Low Importance</p>", unsafe_allow_html=True)
             with col3:
-                st.markdown("<p style='text-align: right; font-size: 12px; color: #888; margin-top: -15px;'>Critical Importance</p>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: right; font-size: 12px; color: #888; margin-top: -15px; background: none;'>Critical Importance</p>", unsafe_allow_html=True)
 
             tag_weights[tag] = weight
 
@@ -441,7 +447,31 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
 
                         with col2:
                             st.subheader(game['name'])
-                            st.write(f"Similarity Score: {game['similarity']:.4f}")
+                            
+                            # Display similarity with visual indicator
+                            similarity_pct = int(game['similarity'] * 100)
+                            st.markdown(f"""
+                            <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                                <div style="width: 120px; font-size: 14px;">Match Score:</div>
+                                <div style="flex-grow: 1; background-color: #14212b; height: 14px; border-radius: 7px; overflow: hidden;">
+                                    <div style="width: {similarity_pct}%; background-color: #66c0f4; height: 100%;"></div>
+                                </div>
+                                <div style="width: 60px; text-align: right; margin-left: 10px;">{similarity_pct}%</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Game tags (top 5)
+                            # Handle different column names (either 'app_id' or 'id')
+                            if 'id' in games_df.columns:
+                                game_row = games_df[games_df['id'] == game['app_id']]
+                            else:
+                                game_row = games_df[games_df['app_id'] == game['app_id']]
+                            
+                            if not game_row.empty:
+                                game_tags = game_row['tags'].values[0].split(',')[:5]
+                                st.markdown('<div style="display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px;">' + 
+                                            ''.join([f'<span style="background-color: #14212b; padding: 3px 8px; border-radius: 10px; font-size: 12px;">{tag}</span>' for tag in game_tags]) + 
+                                            '</div>', unsafe_allow_html=True)
 
                             # Show tier information
                             if game['app_id'] in st.session_state.whitelisted_games:
@@ -455,7 +485,7 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
 
                             # Steam link
                             steam_url = f"https://store.steampowered.com/app/{game['app_id']}"
-                            st.markdown(f"[View on Steam]({steam_url})")
+                            st.markdown(f"<a href='{steam_url}' target='_blank' style='color: #66c0f4; text-decoration: none;'><div style='display: inline-flex; align-items: center; background-color: #14212b; padding: 5px 10px; border-radius: 3px; margin-top: 5px;'>🎮 View on Store Page</div></a>", unsafe_allow_html=True)
 
                             # Rating slider - INI GAK BAKAL AUTO-RERUN
                             rating = st.slider(
@@ -466,6 +496,13 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
                                 key=f"form_improved_{game['app_id']}",
                                 help=f"How relevant is {game['name']} to your preferences?"
                             )
+                            
+                            # Add custom labels for improved recommendations rating slider
+                            col_left_imp, col_middle_imp, col_right_imp = st.columns([3, 4, 3])
+                            with col_left_imp:
+                                st.markdown("<p style='text-align: left; font-size: 12px; color: #888; margin-top: -15px; white-space: nowrap; background: none;'>Not Relevant</p>", unsafe_allow_html=True)
+                            with col_right_imp:
+                                st.markdown("<p style='text-align: right; font-size: 12px; color: #888; margin-top: -15px; white-space: nowrap; background: none;'>Very Relevant</p>", unsafe_allow_html=True)
 
                             # Store in temporary dict
                             ratings_dict[game['app_id']] = rating
@@ -555,9 +592,9 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
                     # Add custom labels for the rating slider
                     col_left, col_middle, col_right = st.columns([3, 4, 3])
                     with col_left:
-                        st.markdown("<p style='text-align: left; font-size: 12px; color: #888; margin-top: -15px; white-space: nowrap;'>Not Relevant</p>", unsafe_allow_html=True)
+                        st.markdown("<p style='text-align: left; font-size: 12px; color: #888; margin-top: -15px; white-space: nowrap; background: none;'>Not Relevant</p>", unsafe_allow_html=True)
                     with col_right:
-                        st.markdown("<p style='text-align: right; font-size: 12px; color: #888; margin-top: -15px; white-space: nowrap;'>Very Relevant</p>", unsafe_allow_html=True)
+                        st.markdown("<p style='text-align: right; font-size: 12px; color: #888; margin-top: -15px; white-space: nowrap; background: none;'>Very Relevant</p>", unsafe_allow_html=True)
 
                     # Store rating in session state
                     st.session_state.game_ratings[game['app_id']] = rating
