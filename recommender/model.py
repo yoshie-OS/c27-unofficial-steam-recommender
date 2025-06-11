@@ -179,84 +179,86 @@ def updateTagRelevancyWithResistance(ratings, games_df, current_tag_relevancy=No
 
     return tag_relevancy
 
-def updateUserProfileWith3TierResistance(user_profile, games_df, ratings, unique_tags_df, original_user_tags=None):
+def updateUserProfileWith3TierResistance(user_profile, games_df, ratings, unique_tags_df, original_user_tags):
     """
-    Enhanced user profile update with 3-tier resistance system and original tag protection.
-
+    Update user profile with enhanced 3-tier resistance system and strong original tag protection
+    
     Parameters:
-    - user_profile: DataFrame with user's current profile
-    - games_df: DataFrame with game information
-    - ratings: Dictionary mapping game IDs to ratings (1-5)
-    - unique_tags_df: DataFrame with all unique tags
-    - original_user_tags: Set of tags from user's original input (Steam library or categories)
-
+    -----------
+    user_profile : DataFrame
+        User profile with tag counts
+    games_df : DataFrame
+        Game data containing tags
+    ratings : dict
+        Dictionary of game ratings from user feedback
+    unique_tags_df : DataFrame
+        DataFrame of all unique tags
+    original_user_tags : set
+        Set of original user tags to protect from elimination
+        
     Returns:
-    - Updated user profile DataFrame with original tag protection
+    --------
+    DataFrame
+        Updated user profile with adjusted tag counts
     """
-    # Create a copy of the user profile
+    # Create a copy to avoid modifying original
     updated_profile = user_profile.copy()
-
-    # Track which tags to boost, resist, or penalize
-    tags_to_boost = set()      # Rating 4-5: BIG boost
-    tags_medium_resist = set() # Rating 3: SMALL penalty (medium resistance)
-    tags_to_penalize = set()   # Rating 1-2: BIG penalty
-
-    # Identify tags for each tier based on ratings
+    
+    # Store original tag values for protection
+    original_values = {}
+    for tag in original_user_tags:
+        if tag in updated_profile['tag'].values:
+            original_values[tag] = updated_profile.loc[updated_profile['tag'] == tag, 'tag_count'].values[0]
+    
+    # Process each rated game
     for app_id, rating in ratings.items():
-        game_tags = extract_game_tags(app_id, games_df)
-
-        if rating >= 4:
-            tags_to_boost.update(game_tags)
-        elif rating == 3:
-            tags_medium_resist.update(game_tags)
-        elif rating <= 2:
-            tags_to_penalize.update(game_tags)
-
-    # Remove conflicts (priority: boost > resist > penalize)
-    tags_medium_resist = tags_medium_resist - tags_to_boost
-    tags_to_penalize = tags_to_penalize - tags_to_boost - tags_medium_resist
-
-    # Calculate minimum values for original user tags (protection system)
-    original_minimums = {}
-    if original_user_tags:
-        for tag in original_user_tags:
-            tag_row = user_profile[user_profile['tag'] == tag]
-            if not tag_row.empty:
-                original_weight = tag_row['tag_count'].iloc[0]
-                # Original tags can't go below 20% of original value or minimum 0.1
-                original_minimums[tag] = max(original_weight * 0.2, 0.1)
-
-    # Apply 3-tier modifications with original tag protection
-    for idx, row in updated_profile.iterrows():
-        tag = row['tag']
-        original_weight = row['tag_count']
-
-        if tag in tags_to_boost:
-            # BIG BOOST: 15x multiplier for loved tags
-            updated_profile.at[idx, 'tag_count'] = original_weight * 15.0
-        elif tag in tags_medium_resist:
-            # MEDIUM RESISTANCE: Small penalty (30% reduction)
-            new_weight = original_weight * 0.7
-
-            # Apply original tag protection
-            if original_user_tags and tag in original_user_tags:
-                new_weight = max(new_weight, original_minimums[tag])
-
-            updated_profile.at[idx, 'tag_count'] = new_weight
-        elif tag in tags_to_penalize:
-            # BIG PENALTY: Large penalty (99.5% reduction)
-            new_weight = original_weight * 0.005
-
-            # Apply original tag protection (stronger protection for severely penalized tags)
-            if original_user_tags and tag in original_user_tags:
-                new_weight = max(new_weight, original_minimums[tag])
-
-            updated_profile.at[idx, 'tag_count'] = new_weight
-
-        # Ensure weight doesn't go negative
-        if updated_profile.at[idx, 'tag_count'] < 0:
-            updated_profile.at[idx, 'tag_count'] = 0
-
+        # Get game tags - handle different column names
+        if 'id' in games_df.columns:
+            game_row = games_df[games_df['id'] == app_id]
+        else:
+            game_row = games_df[games_df['app_id'] == app_id]
+            
+        if game_row.empty:
+            continue
+            
+        game_tags = game_row['tags'].values[0].split(',')
+        
+        for tag in game_tags:
+            # Skip if tag not in profile
+            if tag not in updated_profile['tag'].values:
+                continue
+                
+            # Calculate adjustment based on rating (3-tier system)
+            if rating <= 2:  # Negative feedback (1-2 stars)
+                adjustment = -0.15  # Penalty for disliked games
+            elif rating == 3:  # Neutral feedback (3 stars)
+                adjustment = 0.05   # Small boost for neutral games
+            else:  # Positive feedback (4-5 stars)
+                adjustment = 0.25   # Larger boost for liked games
+            
+            # Apply adjustment
+            current_value = updated_profile.loc[updated_profile['tag'] == tag, 'tag_count'].values[0]
+            new_value = max(0, current_value + adjustment)
+            updated_profile.loc[updated_profile['tag'] == tag, 'tag_count'] = new_value
+    
+    # ENHANCED PROTECTION LOGIC: Protect original user interests
+    for tag, original_value in original_values.items():
+        current_value = updated_profile.loc[updated_profile['tag'] == tag, 'tag_count'].values[0]
+        
+        # Calculate minimum allowed value (30% of original or absolute minimum 0.15)
+        min_allowed = max(original_value * 0.3, 0.15)
+        
+        # If current value is below minimum allowed, restore it
+        if current_value < min_allowed:
+            updated_profile.loc[updated_profile['tag'] == tag, 'tag_count'] = min_allowed
+            
+    # Final safety check for original tags
+    for tag in original_user_tags:
+        if tag in updated_profile['tag'].values:
+            if updated_profile.loc[updated_profile['tag'] == tag, 'tag_count'].values[0] <= 0:
+                # Force a minimum value for original tags to ensure they're never eliminated
+                updated_profile.loc[updated_profile['tag'] == tag, 'tag_count'] = 0.15
+    
     return updated_profile
 
 def calculateDynamicThreshold(app_id, games_df, tag_relevancy, base_threshold):

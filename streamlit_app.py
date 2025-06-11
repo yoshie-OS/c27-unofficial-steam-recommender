@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from pathlib import Path
+import base64
 
 # Import your existing functions
 from api.connector import userDataCollector
@@ -28,12 +29,61 @@ from evaluation.metrics import (
     saveUserEvaluation
 )
 
+# Function to add Steam-inspired styling
+def add_steam_bg():
+    """
+    Add Steam-inspired background and CSS styling
+    """
+    steam_bg = """
+    <style>
+        .stApp {
+            background-color: #1b2838;
+            color: #c7d5e0;
+        }
+        .stButton>button {
+            background-color: #66c0f4;
+            color: #1b2838;
+            font-weight: bold;
+            border: none;
+        }
+        .stButton>button:hover {
+            background-color: #1e90ff;
+        }
+        h1, h2, h3 {
+            color: #66c0f4 !important;
+        }
+        .stForm {
+            background-color: #2a475e;
+            padding: 20px;
+            border-radius: 5px;
+        }
+        .stMetric {
+            background-color: #2a475e;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .css-1d391kg {
+            background-color: #2a475e;
+        }
+        div.stSlider > div[data-baseweb] > div > div {
+            background-color: #66c0f4;
+        }
+        div.stSlider > div[data-baseweb] > div > div > div {
+            background-color: #1e90ff;
+        }
+    </style>
+    """
+    st.markdown(steam_bg, unsafe_allow_html=True)
+
+
+
 # Page configuration
 st.set_page_config(
     page_title="C27 Unofficial Steam Recommender",
     page_icon="🎮",
     layout="centered"
 )
+add_steam_bg()
 
 # Enhanced 3-tier session state initialization with original tag protection
 if 'evaluation_submitted' not in st.session_state:
@@ -294,6 +344,35 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
 
         if st.session_state.original_user_tags:
             st.caption("🔒 = Protected original interests (can't go to zero)")
+            
+        # Debug information in an expandable section
+        with st.expander("Debug Information (Tag Protection)"):
+            st.write("**Protected Original Tags:**")
+            
+            # Get original tag values from initial profile
+            original_profile = st.session_state.user_profile
+            protected_tags_df = original_profile[original_profile['tag'].isin(st.session_state.original_user_tags)]
+            
+            # Create a comparison DataFrame
+            debug_df = pd.DataFrame({
+                'tag': protected_tags_df['tag'],
+                'original_value': protected_tags_df['tag_count'],
+                'updated_value': [updated_profile.loc[updated_profile['tag'] == tag, 'tag_count'].values[0] 
+                                if tag in updated_profile['tag'].values else 0 
+                                for tag in protected_tags_df['tag']]
+            })
+            
+            # Calculate protection effectiveness
+            debug_df['protected'] = debug_df['updated_value'] > 0
+            debug_df['protection_level'] = (debug_df['updated_value'] / debug_df['original_value'] * 100).fillna(0).round(1)
+            
+            # Display the debug table
+            st.dataframe(debug_df)
+            
+            # Display protection stats
+            st.write(f"**Protection Status:** {debug_df['protected'].sum()}/{len(debug_df)} tags protected")
+            avg_protection = debug_df['protection_level'].mean()
+            st.write(f"**Average Protection Level:** {avg_protection:.1f}% of original value")
 
         # Store updated profile
         st.session_state.user_profile = updated_profile
@@ -417,44 +496,74 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
         if 'game_ratings' not in st.session_state:
             st.session_state.game_ratings = {}
 
-        # Display recommendations with rating sliders
+        # Display recommendations with enhanced information
         for i, game in recommendations.iterrows():
-            col1, col2 = st.columns([1, 3])
+            with st.container():
+                st.markdown(f"""
+                <div style="background-color: #2a475e; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                """, unsafe_allow_html=True)
+                
+                col1, col2 = st.columns([1, 3])
 
-            with col1:
-                # Game image
-                image_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{game['app_id']}/header.jpg"
-                st.image(image_url, width=150)
+                with col1:
+                    # Game image
+                    image_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{game['app_id']}/header.jpg"
+                    st.image(image_url, width=150)
 
-            with col2:
-                st.subheader(game['name'])
-                st.write(f"Similarity Score: {game['similarity']:.4f}")
+                with col2:
+                    st.subheader(game['name'])
+                    
+                    # Display similarity with visual indicator
+                    similarity_pct = int(game['similarity'] * 100)
+                    st.markdown(f"""
+                    <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                        <div style="width: 120px; font-size: 14px;">Match Score:</div>
+                        <div style="flex-grow: 1; background-color: #14212b; height: 14px; border-radius: 7px; overflow: hidden;">
+                            <div style="width: {similarity_pct}%; background-color: #66c0f4; height: 100%;"></div>
+                        </div>
+                        <div style="width: 60px; text-align: right; margin-left: 10px;">{similarity_pct}%</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Game tags (top 5)
+                    # Handle different column names (either 'app_id' or 'id')
+                    if 'id' in games_df.columns:
+                        game_row = games_df[games_df['id'] == game['app_id']]
+                    else:
+                        game_row = games_df[games_df['app_id'] == game['app_id']]
+                    
+                    if not game_row.empty:
+                        game_tags = game_row['tags'].values[0].split(',')[:5]
+                        st.markdown('<div style="display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px;">' + 
+                                    ''.join([f'<span style="background-color: #14212b; padding: 3px 8px; border-radius: 10px; font-size: 12px;">{tag}</span>' for tag in game_tags]) + 
+                                    '</div>', unsafe_allow_html=True)
 
-                # Link to Steam store
-                steam_url = f"https://store.steampowered.com/app/{game['app_id']}"
-                st.markdown(f"[View on Steam]({steam_url})")
+                    # Link to Steam store
+                    steam_url = f"https://store.steampowered.com/app/{game['app_id']}"
+                    st.markdown(f"<a href='{steam_url}' target='_blank' style='color: #66c0f4; text-decoration: none;'><div style='display: inline-flex; align-items: center; background-color: #14212b; padding: 5px 10px; border-radius: 3px; margin-top: 5px;'>🎮 View on Store Page</div></a>", unsafe_allow_html=True)
 
-                # Rating slider for each game
-                rating = st.slider(
-                    f"Rate this game",
-                    min_value=1,
-                    max_value=5,
-                    value=3,
-                    key=f"game_rating_{game['app_id']}",
-                    help=f"How relevant is {game['name']} to your preferences?"
-                )
+                    # Rating slider for each game
+                    rating = st.slider(
+                        f"Rate this game",
+                        min_value=1,
+                        max_value=5,
+                        value=3,
+                        key=f"game_rating_{game['app_id']}",
+                        help=f"How relevant is {game['name']} to your preferences?"
+                    )
 
-                # Add custom labels for the rating slider
-                col_left, col_middle, col_right = st.columns([3, 4, 3])
-                with col_left:
-                    st.markdown("<p style='text-align: left; font-size: 12px; color: #888; margin-top: -15px; white-space: nowrap;'>Not Relevant</p>", unsafe_allow_html=True)
-                with col_right:
-                    st.markdown("<p style='text-align: right; font-size: 12px; color: #888; margin-top: -15px; white-space: nowrap;'>Very Relevant</p>", unsafe_allow_html=True)
+                    # Add custom labels for the rating slider
+                    col_left, col_middle, col_right = st.columns([3, 4, 3])
+                    with col_left:
+                        st.markdown("<p style='text-align: left; font-size: 12px; color: #888; margin-top: -15px; white-space: nowrap;'>Not Relevant</p>", unsafe_allow_html=True)
+                    with col_right:
+                        st.markdown("<p style='text-align: right; font-size: 12px; color: #888; margin-top: -15px; white-space: nowrap;'>Very Relevant</p>", unsafe_allow_html=True)
 
-                # Store rating in session state
-                st.session_state.game_ratings[game['app_id']] = rating
+                    # Store rating in session state
+                    st.session_state.game_ratings[game['app_id']] = rating
 
-            st.markdown("---")
+                # End of container div
+                st.markdown("</div>", unsafe_allow_html=True)
 
         # Evaluation buttons section
         st.header("Submit Your Feedback")
@@ -480,6 +589,45 @@ if 'recommendations' in st.session_state and not st.session_state.recommendation
                     del st.session_state[key]
                 st.rerun()
 
+# Add project background information
+if not any(key in st.session_state for key in ['recommendations', 'evaluation_submitted', 'show_improved']):
+    st.markdown("---")
+    with st.expander("About This Project", expanded=True):
+        st.markdown("""
+        ### 🎮 Steam Game Recommendation System
+        
+        This app provides **personalized Steam game recommendations** using content-based filtering with cosine similarity and user feedback learning.
+        
+        #### 🔍 How It Works:
+        
+        1. **Input Methods**:
+           - **Steam ID**: Analyzes your game library automatically
+           - **Category Selection**: Manually select genres you enjoy
+           
+        2. **Recommendation Technology**:
+           - Creates a profile of your gaming preferences
+           - Normalizes game and user vectors
+           - Finds games similar to your profile using cosine similarity
+           
+        3. **Learning System**:
+           - Uses a 3-tier feedback mechanism (Blacklisted, Neutral, Whitelisted)
+           - Protects your core interests even after multiple feedback cycles
+           - Improves recommendations based on your ratings
+           
+        #### 📊 Recommendation Quality:
+        
+        The system evaluates recommendations using metrics including:
+        - **NDCG Score**: Measures ranking quality
+        - **Average Rating**: Based on your feedback
+        - **Genre Coverage**: How well recommendations match your interests
+
+        #### 🔒 Privacy Note:
+        No user data is stored permanently. Data is accessed only during your session and is not retained after you close the app.
+        
+        #### 🧪 Project Context:
+        This is a capstone project demonstrating practical application of recommendation systems, machine learning concepts, and interactive user feedback.
+        """)
+
 # Footer
 st.markdown("---")
-st.caption("C27 Unofficial Steam Recommender © 2025")
+st.caption("C27 Unofficial Steam Recommender © 2025 | Aplikasi dibuat menggunakan LLM Claude oleh Anthropic. Segala kebenaran masih perlu diverifikasi oleh ahli.")
